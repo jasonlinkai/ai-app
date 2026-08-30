@@ -1,0 +1,33 @@
+appId: com.localai.agentdemo
+productName: Local AI Agent Demo
+directories:
+  output: release
+  buildResources: build
+
+# electron-vite build output (main, preload, renderer)
+files:
+  - out/**/*
+  - package.json
+
+# node-llama-cpp ships native (.node) addons that cannot run from inside
+# an asar archive, so its files (and the prebuilt binaries in the
+# per-platform @node-llama-cpp/* packages) are extracted to
+# app.asar.unpacked instead.
+asarUnpack:
+  - node_modules/node-llama-cpp/**/*
+  - node_modules/@node-llama-cpp/**/*
+
+# The GGUF model is placed outside the asar archive entirely, under
+# Contents/Resources/models on macOS (process.resourcesPath at runtime).
+extraResources:
+  - from: resources/models
+    to: models
+    filter:
+      - "**/*"
+
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch:
+        - arm64

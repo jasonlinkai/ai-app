@@ -1,0 +1,49 @@
+{
+  "name": "local-ai-electron-demo",
+  "version": "0.1.0",
+  "description": "Minimal Electron desktop app with a fully embedded, local (no Ollama, no cloud) LLM agent and an interactive chat UI.",
+  "private": true,
+  "main": "./out/main/main.js",
+  "author": "Local AI Agent Demo",
+  "license": "MIT",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --build --force",
+    "dist:mac": "electron-vite build && electron-builder --mac --config electron-builder.yml"
+  },
+  "dependencies": {
+    "@ai-sdk/react": "^4.0.87",
+    "@assistant-ui/ai-sdk": "^0.0.3",
+    "@assistant-ui/react": "^0.15.17",
+    "@langchain/core": "^1.2.9",
+    "@langchain/langgraph": "^1.4.13",
+    "ai": "^7.0.84",
+    "express": "^5.2.1",
+    "node-llama-cpp": "^3.20.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.4.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6"
+  },
+  "allowScripts": {
+    "node-llama-cpp@3.20.0": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true,
+    "fsevents@2.3.3": true
+  }
+}
