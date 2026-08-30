@@ -1,0 +1,5 @@
+.venv/
+.venv-convert/
+vendor/
+adapters/
+test-base/

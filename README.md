@@ -50,6 +50,8 @@ src/
 resources/
   models/
     model.gguf        ← you place the model file here (see "Model" below)
+    adapter.gguf       ← optional LoRA adapter (see "Fine-tuning with LoRA")
+finetune/               ← separate LoRA fine-tuning pipeline, see finetune/README.md
 ```
 
 ## Interactive chat & conversation state
@@ -313,6 +315,18 @@ tool-call reliability matters less than footprint for your use case.
   asar archive, and `model.ts` resolves it via `process.resourcesPath` at
   runtime, so the packaged app always finds it regardless of install
   location.
+
+## Fine-tuning with LoRA
+
+`finetune/` is a separate, developer-side pipeline (MLX for training on
+Apple Silicon → convert to a GGUF LoRA adapter) for fine-tuning the model
+with LoRA. The adapter is applied at runtime by `model.ts` — via
+`LOCAL_LORA_PATH` in dev, or `resources/models/adapter.gguf` if present —
+on top of the unmodified base GGUF; it is never merged into
+`model.gguf`. See `finetune/README.md` for the full pipeline, the mlx-lm ↔
+PEFT format conversion it required, and measured before/after output
+proving the adapter actually changes generation (not just that it loads
+without error).
 
 ## Development
 

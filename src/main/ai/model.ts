@@ -1,8 +1,10 @@
 import path from "node:path";
+import fs from "node:fs";
 import { app } from "electron";
 import type { LlamaChatSession as LlamaChatSessionType } from "node-llama-cpp";
 
 const MODEL_FILENAME = "model.gguf";
+const LORA_FILENAME = "adapter.gguf";
 
 /**
  * Development: resources/models/model.gguf next to the project root
@@ -24,6 +26,24 @@ function resolveModelPath(): string {
   return path.join(process.cwd(), "resources", "models", MODEL_FILENAME);
 }
 
+/**
+ * A GGUF LoRA adapter (see finetune/ for how to produce one) is entirely
+ * optional and applied at runtime, on top of the unmodified base model —
+ * it is never merged into resources/models/model.gguf. Same resolution
+ * pattern as the base model, but resolves to `undefined` if no adapter
+ * file exists at the resolved location, since this app runs perfectly
+ * fine without one.
+ */
+function resolveLoraPath(): string | undefined {
+  const loraPath =
+    process.env.LOCAL_LORA_PATH ??
+    (app.isPackaged
+      ? path.join(process.resourcesPath, "models", LORA_FILENAME)
+      : path.join(process.cwd(), "resources", "models", LORA_FILENAME));
+
+  return fs.existsSync(loraPath) ? loraPath : undefined;
+}
+
 let sessionPromise: Promise<LlamaChatSessionType> | null = null;
 
 async function createSession(): Promise<LlamaChatSessionType> {
@@ -34,10 +54,12 @@ async function createSession(): Promise<LlamaChatSessionType> {
   const { getLlama, LlamaChatSession } = await import("node-llama-cpp");
 
   const modelPath = resolveModelPath();
+  const loraPath = resolveLoraPath();
+  if (loraPath) console.log("Loaded LoRA adapter:", loraPath);
 
   const llama = await getLlama();
   const model = await llama.loadModel({ modelPath });
-  const context = await model.createContext();
+  const context = await model.createContext(loraPath ? { lora: { adapters: [{ filePath: loraPath }] } } : {});
 
   return new LlamaChatSession({
     contextSequence: context.getSequence(),
