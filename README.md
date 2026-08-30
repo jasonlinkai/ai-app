@@ -39,8 +39,9 @@ src/
       model.ts      Resolves the GGUF model path, owns the LlamaChatSession
       tools.ts       The one say_hello LangChain tool (+ its function definition)
       agent.ts       LangGraph graph: conversation state + tool-calling turn
+      toolEvents.ts  Tiny EventEmitter for live "tool started/finished" events
   preload/
-    preload.ts       contextBridge.exposeInMainWorld("ai", { chat })
+    preload.ts       contextBridge.exposeInMainWorld("ai", { chat, onToolEvent })
   renderer/
     App.tsx           Chat UI, built on assistant-ui's Thread primitives
     transport.ts       Adapts useChat()'s ChatTransport to window.ai.chat()
@@ -104,15 +105,18 @@ small `ElectronIpcChatTransport` that:
 1. Pulls the latest user message's text out of the `UIMessage[]` history
    it's handed (older turns aren't resent — the main process already
    remembers them, see above).
-2. Calls `window.ai.chat(text)` and awaits the single reply string.
-3. Wraps that string as a minimal-but-valid `UIMessageChunk` stream
-   (`start` → `text-start`/`text-delta`/`text-end` → `finish`) so the
-   runtime sees a normal completed turn — it just arrives all at once
-   instead of token-by-token.
+2. Calls `window.ai.chat(text)`, and while that call is in flight, listens
+   for live tool-call events (see "Live tool-call status" below) and turns
+   each one into a `tool-input-available` / `tool-output-available`
+   `UIMessageChunk` as it happens.
+3. Once `window.ai.chat()` resolves, appends the final reply as a
+   `text-start`/`text-delta`/`text-end` chunk sequence and closes the
+   stream — the runtime sees a normal completed turn assembled from one
+   live event plus one blocking call, not real token-by-token streaming.
 
-None of `main.ts`, `preload.ts`, `server.ts`, or `agent.ts` changed for
-this — `transport.ts` is the entire integration surface, unchanged from the
-plain-`useChat()` version that preceded assistant-ui.
+`transport.ts` (plus a small live-event bridge — see below) is the entire
+integration surface between assistant-ui/`useChat()` and this app's IPC;
+`agent.ts` and `server.ts` are unaware any of this exists.
 
 ## Tool → HTTP → Express flow
 
@@ -135,6 +139,48 @@ in this codebase.
 Express (`src/main/server.ts`) binds only to `127.0.0.1:18765` and exposes
 exactly one route, `POST /api/say-hello`, which logs `AI says: <message>` to
 the Electron main-process console and replies `{ "success": true }`.
+
+## Live tool-call status (like a coding agent showing "running: …")
+
+The UI shows `🔧 say_hello("Hello Jack!") — running…` the moment the tool
+actually starts executing, flipping to `✅ … — done` once it completes —
+not just the final text reply appearing after everything is over. This
+uses two existing, standard mechanisms glued together, not a custom status
+system:
+
+- **AI SDK's tool-call protocol**: `UIMessageChunk` already has
+  `tool-input-available` / `tool-output-available` chunk types for exactly
+  this — a tool call in progress vs. completed, as a distinct message part
+  alongside the text.
+- **assistant-ui's tool-call rendering**: `MessagePrimitive.Content`'s
+  render-prop form is called once per part; a part with
+  `part.type === "tool-call"` carries `toolName`, `args`, `result`, and
+  `status.type` (`"running"` → `"complete"`) — `App.tsx`'s `ToolCallStatus`
+  component just reads those straight off the part.
+
+The missing piece was *timing*: `window.ai.chat()` only resolves once the
+whole turn (including the tool call) is done, so by itself it can't tell
+the renderer "the tool just started." To get genuinely live updates:
+
+1. `src/main/ai/toolEvents.ts` is a tiny `EventEmitter`. `tools.ts`'s
+   `sayHelloTool` implementation emits a `tool-call-start` event right
+   before its `fetch()` call and a `tool-call-end` event right after,
+   carrying the same `toolCallId`.
+2. `main.ts` subscribes once at startup and forwards every event to the
+   renderer via `mainWindow.webContents.send("ai:tool-event", event)` — a
+   push channel, separate from the `ai:chat` request/response `invoke()`.
+3. `preload.ts` exposes this as `window.ai.onToolEvent(callback)`
+   (returns an unsubscribe function), the only other thing added to the
+   renderer's IPC surface.
+4. `transport.ts` subscribes to `onToolEvent` for the duration of each
+   `sendMessages()` call and enqueues the corresponding chunk into the same
+   stream `useChat()` is reading from — see above.
+
+Because `fetch()` inside `sayHelloTool` is real async I/O, the `tool-call-
+start` event reaches the renderer (and repaints the status card) while
+`node-llama-cpp` is still blocked inside `session.promptWithMeta()` waiting
+for the HTTP round trip — this is genuinely live, not simulated with a
+timer.
 
 ## Security boundary
 

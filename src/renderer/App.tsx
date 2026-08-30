@@ -41,23 +41,42 @@ function Thread() {
 }
 
 function Message({ role }: { role: ThreadMessage["role"] }) {
-  const isUser = role === "user";
+  if (role === "user") {
+    return (
+      <MessagePrimitive.Root className="flex max-w-[70%] flex-col items-end gap-1 self-end">
+        <div className="text-[11px] uppercase tracking-wide text-neutral-400">You</div>
+        <div className="whitespace-pre-wrap break-words rounded-2xl bg-blue-600 px-3.5 py-2.5 text-sm leading-relaxed text-white">
+          <MessagePrimitive.Content />
+        </div>
+      </MessagePrimitive.Root>
+    );
+  }
+
   return (
-    <MessagePrimitive.Root
-      className={`flex max-w-[70%] flex-col ${isUser ? "self-end items-end" : "self-start items-start"}`}
-    >
-      <div className="mb-1 text-[11px] uppercase tracking-wide text-neutral-400">
-        {isUser ? "You" : "AI"}
-      </div>
-      <div
-        className={`whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
-          isUser ? "bg-blue-600 text-white" : "border border-neutral-200 bg-white text-neutral-900"
-        }`}
-      >
-        <MessagePrimitive.Content components={{ Empty: ThinkingIndicator }} />
-      </div>
+    <MessagePrimitive.Root className="flex max-w-[70%] flex-col items-start gap-1 self-start">
+      <div className="text-[11px] uppercase tracking-wide text-neutral-400">AI</div>
+
+      <MessagePrimitive.Content>
+        {({ part }) => {
+          if (part.type === "tool-call") return <ToolCallStatus part={part} />;
+
+          if (part.type === "text") {
+            if (part.text === "" && part.status?.type === "running") {
+              return <ThinkingBubble />;
+            }
+            return (
+              <div className="whitespace-pre-wrap break-words rounded-2xl border border-neutral-200 bg-white px-3.5 py-2.5 text-sm leading-relaxed text-neutral-900">
+                {part.text}
+              </div>
+            );
+          }
+
+          return null;
+        }}
+      </MessagePrimitive.Content>
+
       <MessagePrimitive.Error>
-        <ErrorPrimitive.Root className="mt-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+        <ErrorPrimitive.Root className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
           <ErrorPrimitive.Message />
         </ErrorPrimitive.Root>
       </MessagePrimitive.Error>
@@ -65,8 +84,37 @@ function Message({ role }: { role: ThreadMessage["role"] }) {
   );
 }
 
-function ThinkingIndicator() {
-  return <span className="italic text-neutral-400">Thinking…</span>;
+type ToolCallPart = {
+  type: "tool-call";
+  toolName: string;
+  args: unknown;
+  result?: unknown;
+  status: { type: string };
+};
+
+/** Live "say_hello is running / done" status card — this is what makes the
+ * tool call visible to the user as it happens, not just the final reply. */
+function ToolCallStatus({ part }: { part: ToolCallPart }) {
+  const isRunning = part.status.type === "running";
+  const message = (part.args as { message?: string } | undefined)?.message ?? "";
+
+  return (
+    <div className="flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-neutral-100 px-2.5 py-1.5 text-xs text-neutral-600">
+      <span>{isRunning ? "🔧" : "✅"}</span>
+      <span>
+        {part.toolName}
+        {message ? `("${message}")` : ""} {isRunning ? "— running…" : "— done"}
+      </span>
+    </div>
+  );
+}
+
+function ThinkingBubble() {
+  return (
+    <div className="rounded-2xl border border-neutral-200 bg-white px-3.5 py-2.5 text-sm italic text-neutral-400">
+      Thinking…
+    </div>
+  );
 }
 
 function Composer() {

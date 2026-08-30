@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import { emitToolEvent } from "./toolEvents";
 
 const SAY_HELLO_URL = "http://127.0.0.1:18765/api/say-hello";
 
@@ -7,9 +9,16 @@ const SAY_HELLO_URL = "http://127.0.0.1:18765/api/say-hello";
  * The one and only tool the agent may call. It performs a real HTTP POST to
  * the Express server started in server.ts — the model never talks to the
  * network directly, and the app never talks to any other host or port.
+ *
+ * It also emits start/end events (toolEvents.ts) around the request so the
+ * renderer can show live "calling say_hello…" / "done" status — see
+ * transport.ts, which turns these into UIMessageChunk tool-call parts.
  */
 export const sayHelloTool = tool(
   async ({ message }: { message: string }) => {
+    const toolCallId = randomUUID();
+    emitToolEvent({ type: "tool-call-start", toolCallId, toolName: "say_hello", args: { message } });
+
     const response = await fetch(SAY_HELLO_URL, {
       method: "POST",
       headers: {
@@ -18,7 +27,9 @@ export const sayHelloTool = tool(
       body: JSON.stringify({ message })
     });
 
-    return await response.json();
+    const result = await response.json();
+    emitToolEvent({ type: "tool-call-end", toolCallId, result });
+    return result;
   },
   {
     name: "say_hello",

@@ -3,6 +3,7 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import { startServer, stopServer } from "./server";
 import { sendMessage } from "./ai/agent";
 import { getModelPath } from "./ai/model";
+import { onToolEvent } from "./ai/toolEvents";
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -36,6 +37,10 @@ app.whenReady().then(() => {
       throw new Error("Message must be a non-empty string.");
     }
     return sendMessage(userText);
+  });
+
+  onToolEvent((event) => {
+    mainWindow?.webContents.send("ai:tool-event", event);
   });
 
   createWindow();
