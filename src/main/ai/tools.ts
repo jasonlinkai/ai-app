@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { emitToolEvent } from "./toolEvents";
+import type { ToolDefinition } from "./llmAdapter";
 
 const SAY_HELLO_URL = "http://127.0.0.1:18765/api/say-hello";
 
@@ -42,25 +43,20 @@ export const sayHelloTool = tool(
 );
 
 /**
- * node-llama-cpp's own function-calling mechanism (grammar-constrained, so
- * it works reliably even with a small 1B model) needs a JSON-schema-shaped
- * function definition rather than a Zod schema. It is kept in sync with
- * sayHelloTool.schema above by hand, since this project intentionally has
- * exactly one tool. The handler below does not duplicate any logic — it
- * just calls the same LangChain tool, so sayHelloTool.invoke() remains the
- * single place that actually performs the HTTP request.
+ * The runtime-agnostic view of the same tool (see llmAdapter.ts): reuses
+ * sayHelloTool's Zod schema directly rather than a hand-duplicated copy,
+ * and its handler just calls sayHelloTool.invoke() — sayHelloTool remains
+ * the single place that actually performs the HTTP request. Each
+ * LocalLlmAdapter implementation (model.ts's, or any future one) converts
+ * `schema` into whatever shape its own runtime needs.
  */
-export const sayHelloFunction = {
+export const sayHelloToolDefinition: ToolDefinition<{ message: string }> = {
+  name: sayHelloTool.name,
   description: sayHelloTool.description,
-  params: {
-    type: "object",
-    properties: {
-      message: {
-        type: "string",
-        description: 'The greeting to send, e.g. "Hello Jack"'
-      }
-    },
-    required: ["message"]
-  },
-  handler: async (params: { message: string }) => sayHelloTool.invoke(params)
-} as const;
+  schema: sayHelloTool.schema,
+  handler: async (params) => sayHelloTool.invoke(params)
+};
+
+/** Every tool the agent may use. Add new tools here — agent.ts and each
+ * LocalLlmAdapter implementation pick them up without further changes. */
+export const allTools: ToolDefinition[] = [sayHelloToolDefinition];

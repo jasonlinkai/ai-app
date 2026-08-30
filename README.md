@@ -36,8 +36,10 @@ src/
     main.ts        Electron entry point, BrowserWindow, IPC handler
     server.ts       Express server (127.0.0.1:18765, POST /api/say-hello)
     ai/
-      model.ts      Resolves the GGUF model path, owns the LlamaChatSession
-      tools.ts       The one say_hello LangChain tool (+ its function definition)
+      llmAdapter.ts  Runtime-agnostic LocalLlmAdapter/ToolDefinition contract
+      zodToGbnf.ts   Converts a tool's Zod schema to node-llama-cpp's GBNF format
+      model.ts       Resolves the GGUF model path; NodeLlamaCppAdapter (implements LocalLlmAdapter)
+      tools.ts       The one say_hello LangChain tool (+ its ToolDefinition)
       agent.ts       LangGraph graph: conversation state + tool-calling turn
       toolEvents.ts  Tiny EventEmitter for live "tool started/finished" events
   preload/
@@ -127,20 +129,53 @@ Zod schema (`src/main/ai/tools.ts`). Its implementation performs an actual
 `fetch()` POST to `http://127.0.0.1:18765/api/say-hello` — it does not touch
 the console directly.
 
-The model itself decides whether to call it: `agent.ts` passes the tool to
-`node-llama-cpp`'s own grammar-constrained function calling
-(`session.promptWithMeta(text, { functions: { say_hello } })`). This is a
-GBNF-grammar-enforced mechanism, so the 1–2B model can only ever emit a
+The model itself decides whether to call it. `agent.ts` doesn't talk to
+`node-llama-cpp` at all — it calls `adapter.chat(text, allTools)` against
+the `LocalLlmAdapter` interface (`llmAdapter.ts`); `model.ts`'s
+`NodeLlamaCppAdapter` is the only place that knows this means
+`session.promptWithMeta(text, { functions })` under the hood, using
+`node-llama-cpp`'s own grammar-constrained function calling. This is a
+GBNF-grammar-enforced mechanism, so the model can only ever emit a
 syntactically valid function call or plain text — never a hallucinated
-malformed call. When the model does call it, `node-llama-cpp` invokes the
-handler (which is just `sayHelloTool.invoke(params)`), feeds the JSON result
-back to the model, and the model's follow-up text becomes the assistant
-reply shown in the UI. There is no `if (message.includes("hello"))` anywhere
-in this codebase.
+malformed call; the grammar itself is generated from `say_hello`'s Zod
+schema via `zodToGbnf.ts` (using Zod's own `toJSONSchema()`), not a
+hand-duplicated copy — `tools.ts` defines the schema exactly once. When the
+model does call it, the adapter invokes the tool's `handler` (which is just
+`sayHelloTool.invoke(params)`), feeds the JSON result back to the model,
+and the model's follow-up text becomes the assistant reply shown in the
+UI. There is no `if (message.includes("hello"))` anywhere in this
+codebase.
 
 Express (`src/main/server.ts`) binds only to `127.0.0.1:18765` and exposes
 exactly one route, `POST /api/say-hello`, which logs `AI says: <message>` to
 the Electron main-process console and replies `{ "success": true }`.
+
+## Swapping the local LLM runtime: `LocalLlmAdapter`
+
+`agent.ts` only depends on `llmAdapter.ts`'s `LocalLlmAdapter` interface —
+`chat(userText, tools) => { toolCalls, responseText }` — not on
+`node-llama-cpp` directly. `model.ts`'s `NodeLlamaCppAdapter` is the only
+class that imports `node-llama-cpp` types or knows what `promptWithMeta`
+or GBNF grammars are; `agent.ts` never sees them.
+
+This wasn't the original shape of the code — earlier versions had
+`agent.ts` calling `session.promptWithMeta()` and parsing
+`node-llama-cpp`'s `ChatModelFunctionCall` result directly, which meant
+swapping the local runtime (say, adding an Ollama or llama.cpp-server
+adapter later) would have meant rewriting `agent.ts`, not just adding a new
+file. It was refactored behind this interface specifically to fix that —
+a second `LocalLlmAdapter` implementation is now a new class in a new
+file; `agent.ts` doesn't change.
+
+The same refactor removed a duplicated tool schema: `tools.ts` used to
+define `say_hello`'s parameters twice — once as the Zod schema LangChain's
+`tool()` needs, once as a hand-copied `GbnfJsonSchema` object for
+`node-llama-cpp`'s function calling, kept in sync by hand. `zodToGbnf.ts`
+now derives the second shape from the first automatically (via Zod's own
+`toJSONSchema()`, stripping the one field `GbnfJsonSchema` doesn't
+recognize) — `tools.ts` defines the schema once, and `allTools` is the one
+place a second tool would be registered, picked up by any
+`LocalLlmAdapter` implementation without further code changes.
 
 ## Live tool-call status (like a coding agent showing "running: …")
 

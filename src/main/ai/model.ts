@@ -1,7 +1,9 @@
 import path from "node:path";
 import fs from "node:fs";
 import { app } from "electron";
-import type { LlamaChatSession as LlamaChatSessionType } from "node-llama-cpp";
+import type { LlamaChatSession as LlamaChatSessionType, ChatSessionModelFunctions } from "node-llama-cpp";
+import type { LocalLlmAdapter, LlmTurnResult, ToolDefinition } from "./llmAdapter";
+import { zodToGbnfSchema } from "./zodToGbnf";
 
 const MODEL_FILENAME = "model.gguf";
 const LORA_FILENAME = "adapter.gguf";
@@ -44,9 +46,45 @@ function resolveLoraPath(): string | undefined {
   return fs.existsSync(loraPath) ? loraPath : undefined;
 }
 
-let sessionPromise: Promise<LlamaChatSessionType> | null = null;
+/**
+ * node-llama-cpp's LocalLlmAdapter implementation. Every node-llama-cpp
+ * type/call (LlamaChatSession, promptWithMeta, its GBNF function-calling
+ * format) is contained in this class — agent.ts only ever sees the
+ * LocalLlmAdapter interface, so swapping in a different local runtime
+ * later means writing a new class here, not touching agent.ts.
+ */
+class NodeLlamaCppAdapter implements LocalLlmAdapter {
+  readonly #session: LlamaChatSessionType;
 
-async function createSession(): Promise<LlamaChatSessionType> {
+  constructor(session: LlamaChatSessionType) {
+    this.#session = session;
+  }
+
+  async chat(userText: string, tools: ToolDefinition[]): Promise<LlmTurnResult> {
+    const functions: Record<string, ChatSessionModelFunctions[string]> = {};
+    for (const t of tools) {
+      functions[t.name] = {
+        description: t.description,
+        params: zodToGbnfSchema(t.schema),
+        handler: t.handler
+      };
+    }
+
+    const result = await this.#session.promptWithMeta(userText, { functions, maxTokens: 512 });
+
+    const toolCalls: LlmTurnResult["toolCalls"] = [];
+    for (const item of result.response) {
+      if (typeof item === "string" || item.type !== "functionCall") continue;
+      toolCalls.push({ name: item.name, args: item.params, result: item.result });
+    }
+
+    return { toolCalls, responseText: result.responseText };
+  }
+}
+
+let adapterPromise: Promise<LocalLlmAdapter> | null = null;
+
+async function createAdapter(): Promise<LocalLlmAdapter> {
   // node-llama-cpp is ESM-only. main/preload are built as CommonJS by
   // electron-vite, so it is loaded with a dynamic import() rather than a
   // static "import" — this is node-llama-cpp's documented way of being
@@ -61,7 +99,7 @@ async function createSession(): Promise<LlamaChatSessionType> {
   const model = await llama.loadModel({ modelPath });
   const context = await model.createContext(loraPath ? { lora: { adapters: [{ filePath: loraPath }] } } : {});
 
-  return new LlamaChatSession({
+  const session = new LlamaChatSession({
     contextSequence: context.getSequence(),
     systemPrompt:
       "You are a minimal local assistant running fully on-device, with no " +
@@ -71,18 +109,21 @@ async function createSession(): Promise<LlamaChatSessionType> {
       "such a request appears, then briefly confirm the message was sent. " +
       "For anything else, reply directly in plain text, concisely."
   });
+
+  return new NodeLlamaCppAdapter(session);
 }
 
 /**
- * The same LlamaChatSession instance is reused for the entire app session,
- * so the model keeps the running conversation in its own context window
- * across turns (see agent.ts for how this ties into LangGraph's state).
+ * The same adapter (and underlying LlamaChatSession) is reused for the
+ * entire app session, so the model keeps the running conversation in its
+ * own context window across turns (see agent.ts for how this ties into
+ * LangGraph's state).
  */
-export function getChatSession(): Promise<LlamaChatSessionType> {
-  if (!sessionPromise) {
-    sessionPromise = createSession();
+export function getLlmAdapter(): Promise<LocalLlmAdapter> {
+  if (!adapterPromise) {
+    adapterPromise = createAdapter();
   }
-  return sessionPromise;
+  return adapterPromise;
 }
 
 export function getModelPath(): string {
