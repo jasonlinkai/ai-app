@@ -195,9 +195,15 @@ needed.
   message was sent" system prompt, resolved this: every test turn (all four
   prompts above, including the "hi" phrasing) both called `say_hello`
   correctly and produced an explicit confirmation in the final reply (e.g.
-  "Sent a greeting to Jack."). This is why the project ships with the 3B
-  model rather than a 1–2B one, even though the task's target range was
-  1–2B — see "Model" above.
+  "Sent a greeting to Jack."). This is why the project uses a 3B model
+  rather than a 1–2B one, even though the task's target range was 1–2B —
+  see "Model" above. Qwen2.5-3B-Instruct was later swapped for
+  **Llama-3.2-3B-Instruct** for licensing reasons unrelated to this testing
+  (Qwen2.5-3B-Instruct's GGUF is non-commercial-only licensed; see "Model").
+  Llama-3.2-3B-Instruct matched or beat Qwen's tool-call reliability (4/4,
+  including the "hi" phrasing) but its final replies just repeat the
+  greeting rather than explicitly confirming success — the two 3B models
+  are not identical here, only both clearly better than the 1.5B model.
 - `node-llama-cpp`'s automatic function-calling loop (call → feed result
   back → continue generating) happens inside a single `promptWithMeta()`
   call. This project represents that whole exchange as one LangGraph node
@@ -225,20 +231,33 @@ Download a small instruction-tuned GGUF model and save it as:
 resources/models/model.gguf
 ```
 
-Used here: **Qwen2.5-3B-Instruct**, `Q4_K_M` quantization, from
-`Qwen/Qwen2.5-3B-Instruct-GGUF` on Hugging Face (the official Qwen org,
-~2.1 GB). Chosen over Qwen2.5-1.5B-Instruct (and Llama-3.2-1B-Instruct)
-after hands-on testing (see "Known limitations" below): at 1.5B, the model
-could either call `say_hello` reliably *or* explicitly confirm success
-afterwards, but tuning the prompt for one consistently broke the other. The
-3B model does both reliably from the same system prompt — every test turn
-called the tool correctly (including phrasing the 1.5B model missed) and
-explicitly confirmed the send (e.g. "Sent a greeting to Jack.") — while
-still being small enough to run comfortably on a laptop. `node-llama-cpp`
-auto-detects its chat template via the built-in `QwenChatWrapper`. A 1–2B
-model (Qwen2.5-1.5B-Instruct, Llama-3.2-1B-Instruct) remains a smaller,
-faster drop-in if tool-call reliability and explicit confirmations both
-matter less than footprint for your use case.
+Used here: **Llama-3.2-3B-Instruct**, `Q4_K_M` quantization, from
+`bartowski/Llama-3.2-3B-Instruct-GGUF` on Hugging Face (~1.9 GB).
+`node-llama-cpp` auto-detects its chat template via the built-in
+`Llama3_2LightweightChatWrapper`.
+
+This project briefly used Qwen2.5-3B-Instruct instead (see "Known
+limitations" below for the tool-calling reliability testing that led to
+picking a 3B model over 1–2B). It was swapped to Llama-3.2-3B-Instruct
+because **Qwen2.5-3B-Instruct's GGUF is licensed under the Qwen RESEARCH
+LICENSE AGREEMENT — non-commercial use only** without a separate license
+from Alibaba Cloud, while Llama-3.2-3B-Instruct's license (Meta's Llama 3.2
+Community License) permits commercial use (a separate license is required
+only above 700M monthly active users). GGUF model licenses are unrelated to
+and vary independently of this project's npm package licenses (all MIT or
+Apache-2.0) — always check the license of the *specific* model and size
+you download; e.g. Qwen2.5-0.5B/1.5B/7B-Instruct are Apache-2.0, but
+Qwen2.5-3B/72B-Instruct are not.
+
+Tradeoff observed switching models: Llama-3.2-3B-Instruct calls
+`say_hello` at least as reliably as Qwen2.5-3B-Instruct (4/4 test turns,
+including a phrasing Qwen sometimes missed), but its final replies tend to
+just repeat the greeting ("Hello Jack!") rather than explicitly confirm
+success ("Sent a greeting to Jack.") the way Qwen2.5-3B-Instruct's did.
+Tool execution itself is identical either way — this is purely the wording
+of the assistant's final text. A 1–2B model (Qwen2.5-1.5B-Instruct,
+Apache-2.0; Llama-3.2-1B-Instruct) remains a smaller, faster drop-in if
+tool-call reliability matters less than footprint for your use case.
 
 - **Development**: the app reads `resources/models/model.gguf` from the
   project root by default. Set `LOCAL_MODEL_PATH=/absolute/path/to/model.gguf`
